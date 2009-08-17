@@ -1,3 +1,4 @@
 ; $Id
 name = Log4Drupal
 description = "Provides a file-based logging framework.  Inspired by log4j."
+core = 6.x

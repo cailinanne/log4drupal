@@ -1,30 +1,27 @@
 <?php
 
-function log_menu($may_cache) {
+function log_menu() {
   $items = array();
 
-  if($may_cache) {
-    $items[] = array(
-      'path' => 'admin/settings/log', 
-      'title' => t('Log4Drupal'),
-      'description' => t('Administer log4drupal, a file-based logging framework.'),
-      'callback' => 'drupal_get_form',
-      'callback arguments' => 'log_admin_settings',
-      'access' => user_access('administer site configuration'),
-      'type' => MENU_NORMAL_ITEM
-    );
-  }
+  $items['admin/settings/log'] = array(
+    'title' => t('Log4Drupal'),
+    'description' => t('Administer log4drupal, a file-based logging framework.'),
+    'page callback' => 'drupal_get_form',
+    'page arguments' => array('log_admin_settings'),
+    'access arguments' => array('administer site configuration'),
+    'type' => MENU_NORMAL_ITEM,
+  );
 
   return $items;
 }
 
 /**
  * We want this module to be loaded during the boostrap phase, so add an empty
- * hook_init method.
+ * hook_boot method.
  *
  */
-function log_init() {
-  
+function log_boot() {
+  log_notice("RUNNING BOOT FOR LOG MODULE"); 
 }
 
 function log_admin_settings() {
@@ -35,23 +32,32 @@ function log_admin_settings() {
     '#default_value' => variable_get('log_loglevel', Log::MAX(PEAR_LOG_DEBUG)),
     '#options' => array (
       Log::MAX(PEAR_LOG_EMERG) => t('emergency'), 
+      Log::MAX(PEAR_LOG_ALERT) => t('alert'), 
+      Log::MAX(PEAR_LOG_CRIT) => t('critical'), 
       Log::MAX(PEAR_LOG_ERR) => t('error'), 
       Log::MAX(PEAR_LOG_WARNING) => t('warning'),
+      Log::MAX(PEAR_LOG_NOTICE) => t('notice'),
       Log::MAX(PEAR_LOG_INFO) => t('info'), 
       Log::MAX(PEAR_LOG_DEBUG) => t('debug')
       ),
     '#description' => t('All messages for specified level and above will appear in log file')
   );
   
-  $form['log_includestack'] = array(
+  $form['log_stacklevel'] = array(
     '#type' => 'radios',
-    '#title' => t('Always include stack trace?'),
-    '#default_value' => variable_get('log_includestack', 0),
+    '#title' => t('Stack trace priority level'),
+    '#default_value' => variable_get('log_stacklevel', Log::MAX(PEAR_LOG_ERROR)),
     '#options' => array (
-      0 => t('No'), 
-      1 => t('Yes'), 
+      Log::MAX(PEAR_LOG_EMERG) => t('emergency'), 
+      Log::MAX(PEAR_LOG_ALERT) => t('alert'), 
+      Log::MAX(PEAR_LOG_CRIT) => t('critical'), 
+      Log::MAX(PEAR_LOG_ERR) => t('error'), 
+      Log::MAX(PEAR_LOG_WARNING) => t('warning'),
+      Log::MAX(PEAR_LOG_NOTICE) => t('notice'),
+      Log::MAX(PEAR_LOG_INFO) => t('info'), 
+      Log::MAX(PEAR_LOG_DEBUG) => t('debug')
       ),
-    '#description' => t('Always include a stack trace with every message?  Stack trace always appears for error and above.')
+    '#description' => t('All messages for specified level and above will include a stack trace in the log file')
   );
 
   $form['log_precision'] = array(
@@ -127,10 +133,12 @@ function _log_get_logger()
  * @param unknown_type $level The log level of the message
  * @param unknown_type $include_stacktrace Should a full stacktrace be included?
  */
-function _log_write_log_message($message, $level, $include_stacktrace = FALSE) {
+function _log_write_log_message($message, $level) {
   
-  if(! $include_stacktrace ) {
-    $include_stacktrace = variable_get('log_includestack', 0);
+  $stacklevel = variable_get('log_stacklevel', Log::MAX(PEAR_LOG_ERROR));
+  
+  if($stacklevel &  Log::MASK($level)) {
+    $include_stacktrace = TRUE;
   }
   
   $trace = debug_backtrace();
@@ -151,10 +159,18 @@ function _log_write_log_message($message, $level, $include_stacktrace = FALSE) {
  * @return unknown  A string of format "[/var/www/drupal/sites/all/modules/example/example.module:238]"
  */
 function _log_get_top($trace) {
-  // The very top of the trace (the 0th element) always comes from
-  // this module.  This is not very useful information for the end user
-  $file = $trace[1]['file'];
-  $line = $trace[1]['line'];
+  
+  // Special case messages originating from our implementation of hook_watchdog
+  if($trace[1]['function'] == 'log_watchdog') {
+    $file = $trace[4]['file'];
+    $line = $trace[4]['line']; 
+  }
+  else {
+    // The very top of the trace (the 0th element) always comes from
+    // this module.  This is not very useful information for the end user
+    $file = $trace[1]['file'];
+    $line = $trace[1]['line'];   
+  }
 
   switch(variable_get('log_precision', 0)) {
     case 1: $file = substr($file, strlen($_SERVER['DOCUMENT_ROOT'] . base_path())); break;
@@ -171,26 +187,44 @@ function _log_get_top($trace) {
  */
 function _log_get_stacktrace($trace) {
   $output = '';
+  
+  // Special case messages originating from our implementation of hook_watchdog
+  if($trace[1]['function'] == 'log_watchdog') {
+    $start_trace = 4;  
+  }
+  else {
+    $start_trace = 1;  
+  }
+  
   foreach($trace as $i => $step) {
     if($step['file']) {
-      // The very top of the trace (the 0th element) always comes from
-      // this module.  This is not very useful information for the end user.
-      if($i >= 1 ) {
+      // The top of the trace always comes from this module.  
+      // This is not very useful information for the end user so we skip it.
+      if($i >= $start_trace ) {
         $output .= "\n  at " . $step['file'] . ':' . $step['line'];
       }
     }
   }
+
   return $output;
+}
+
+function _log_get_message($args) {
+  $message = $args[0];
+  
+  foreach ($args as $count => $arg){
+    if($count > 0) {
+      $message .=  "\n" . print_r($arg, true);
+    }
+  }
+  
+  return $message;
 }
 
 function log_debug($message) {
 
-  foreach (func_get_args() as $count => $arg){
-    if($count > 0) {
-      $message .=  print_r($arg, true) . "\n";
-    }
-  }
-
+  $message = _log_get_message(func_get_args());
+  
   if(_log_get_logger()->getMask() &  Log::MASK(PEAR_LOG_DEBUG)) {
     _log_write_log_message($message, PEAR_LOG_DEBUG);
   }
@@ -198,36 +232,72 @@ function log_debug($message) {
 
 function log_info($message) {
 
+  $message = _log_get_message(func_get_args());
+  
   if(_log_get_logger()->getMask() &  Log::MASK(PEAR_LOG_INFO)){
     _log_write_log_message($message, PEAR_LOG_INFO);
   }
 }
 
+function log_notice($message) {
+
+  $message = _log_get_message(func_get_args());
+  
+  if(_log_get_logger()->getMask() &  Log::MASK(PEAR_LOG_NOTICE)){
+    _log_write_log_message($message, PEAR_LOG_NOTICE);
+  }
+}
+
 function log_warn($message) {
 
-  if(_log_get_logger()->getMask() &  Log::MASK(PEAR_LOG_WARN)) {
+  $message = _log_get_message(func_get_args());
+  
+  if(_log_get_logger()->getMask() &  Log::MASK(PEAR_LOG_WARNING)) {
     _log_write_log_message($message, PEAR_LOG_WARNING);
   }
 }
 
 function log_error($message) {
 
+  $message = _log_get_message(func_get_args());
+  
   if(_log_get_logger()->getMask() &  Log::MASK(PEAR_LOG_ERROR)){
-    _log_write_log_message($message, PEAR_LOG_ERR, true);
+    _log_write_log_message($message, PEAR_LOG_ERR);
+  }
+}
+
+function log_critical($message) {
+
+  $message = _log_get_message(func_get_args());
+  
+  if(_log_get_logger()->getMask() &  Log::MASK(PEAR_LOG_CRIT)){
+    _log_write_log_message($message, PEAR_LOG_CRIT);
+  }
+}
+
+function log_alert($message) {
+  
+  $message = _log_get_message(func_get_args());
+  
+  if(_log_get_logger()->getMask() &  Log::MASK(PEAR_LOG_ALERT)){
+    _log_write_log_message($message, PEAR_LOG_ALERT);
   }
 }
 
 function log_emergency($message) {
-
+  
+  $message = _log_get_message(func_get_args());
+  
   if(_log_get_logger()->getMask() &  Log::MASK(PEAR_LOG_EMERG)){
-    _log_write_log_message($message, PEAR_LOG_EMERG, true);
+    _log_write_log_message($message, PEAR_LOG_EMERG);
   }
 }
 
-function _debug($message) {
-  log_debug($message);
+function log_watchdog($entry) {
+  $message = strip_tags(is_null($entry['variables']) ? $entry['message'] : strtr($entry['message'], $entry['variables']));
+  $severity = $entry['severity'];
+  _log_write_log_message($message, $severity);
 }
-
 
 
 include_once 'Log.php';
