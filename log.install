@@ -1,0 +1,5 @@
+<?php
+
+function log_install() {
+	db_query ( "UPDATE {system} SET weight = -10 WHERE name = 'log'" );
+}

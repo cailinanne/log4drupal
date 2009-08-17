@@ -29,31 +29,40 @@ function log_init() {
 
 function log_admin_settings() {
 
-  $form['log_loglevel'] = array(
+	$form['log_loglevel'] = array(
     '#type' => 'radios',
     '#title' => t('Log priority level'),
     '#default_value' => variable_get('log_loglevel', Log::MAX(PEAR_LOG_DEBUG)),
     '#options' => array (
-      Log::MAX(PEAR_LOG_EMERG) => t('emergency'), 
-      Log::MAX(PEAR_LOG_ERR) => t('error'), 
+      Log::MAX(PEAR_LOG_EMERG) => t('emergency'),
+      Log::MAX(PEAR_LOG_ALERT) => t('alert'),
+      Log::MAX(PEAR_LOG_CRIT) => t('critical'),
+      Log::MAX(PEAR_LOG_ERR) => t('error'),
       Log::MAX(PEAR_LOG_WARNING) => t('warning'),
-      Log::MAX(PEAR_LOG_INFO) => t('info'), 
+      Log::MAX(PEAR_LOG_NOTICE) => t('notice'),
+      Log::MAX(PEAR_LOG_INFO) => t('info'),
       Log::MAX(PEAR_LOG_DEBUG) => t('debug')
       ),
     '#description' => t('All messages for specified level and above will appear in log file')
   );
   
-  $form['log_includestack'] = array(
+  $form['log_stacklevel'] = array(
     '#type' => 'radios',
-    '#title' => t('Always include stack trace?'),
-    '#default_value' => variable_get('log_includestack', 0),
+    '#title' => t('Stack trace priority level'),
+    '#default_value' => variable_get('log_stacklevel', Log::MAX(PEAR_LOG_ERROR)),
     '#options' => array (
-      0 => t('No'), 
-      1 => t('Yes'), 
+      Log::MAX(PEAR_LOG_EMERG) => t('emergency'),
+      Log::MAX(PEAR_LOG_ALERT) => t('alert'),
+      Log::MAX(PEAR_LOG_CRIT) => t('critical'),
+      Log::MAX(PEAR_LOG_ERR) => t('error'),
+      Log::MAX(PEAR_LOG_WARNING) => t('warning'),
+      Log::MAX(PEAR_LOG_NOTICE) => t('notice'),
+      Log::MAX(PEAR_LOG_INFO) => t('info'),
+      Log::MAX(PEAR_LOG_DEBUG) => t('debug')
       ),
-    '#description' => t('Always include a stack trace with every message?  Stack trace always appears for error and above.')
+    '#description' => t('All messages for specified level and above will include a stack trace in the log file')
   );
-
+ 
   $form['log_precision'] = array(
     '#type' => 'radios',
     '#title' => t('Filename precision'),
@@ -63,15 +72,15 @@ function log_admin_settings() {
       t('Path relative to Drupal root'),
       t('Filename only'),
     ),
-    '#description' => t('For log messages, how long should the filename be?  Stack traces always include absolute paths.')
+    '#description' => t('For log messages, how long should the filename be? Stack traces always include absolute paths.')
   );
-
+ 
   $form['log_logfile'] = array(
     '#type' => 'textfield',
     '#title' => t('Log file location'),
     '#default_value' => variable_get('log_logfile', '/var/log/drupal/drupal.log'),
     '#description' => t('Specify the absolute path for the file you would like to log to.')
-  );
+  ); 
   
 
 
@@ -129,18 +138,21 @@ function _log_get_logger()
  */
 function _log_write_log_message($message, $level, $include_stacktrace = FALSE) {
   
-  if(! $include_stacktrace ) {
-    $include_stacktrace = variable_get('log_includestack', 0);
+  $stacklevel = variable_get('log_stacklevel', Log::MAX(PEAR_LOG_ERROR));
+
+  if($stacklevel &  Log::MASK($level)) {
+    $include_stacktrace = TRUE;
   }
-  
+
   $trace = debug_backtrace();
   $log_message =  _log_get_top($trace). $message;
-  
+
   if($include_stacktrace) {
    $log_message .= _log_get_stacktrace($trace);
   }
 
   _log_get_logger()->log($log_message, $level);
+	
 }
 
 /**
@@ -157,7 +169,7 @@ function _log_get_top($trace) {
   $line = $trace[1]['line'];
 
   switch(variable_get('log_precision', 0)) {
-    case 1: $file = substr($file, strlen($_SERVER['DOCUMENT_ROOT'] . base_path())); break;
+    case 1: $file = substr($file, strlen($_SERVER['DOCUMENT_ROOT'] . $GLOBALS['base_path'])); break;
     case 2: $file = ltrim(strrchr($file, "/"), "/"); break;
   }
   return "[$file:$line] ";
@@ -183,51 +195,93 @@ function _log_get_stacktrace($trace) {
   return $output;
 }
 
-function log_debug($message) {
+function _log_get_message($args) {
+  $message = $args[0];
 
-  foreach (func_get_args() as $count => $arg){
+  foreach ($args as $count => $arg){
     if($count > 0) {
-      $message .=  print_r($arg, true) . "\n";
+      $message .=  "\n" . print_r($arg, true);
     }
   }
+
+  return $message;
+}
+
+
+function log_debug($message) {
+
+  $message = _log_get_message(func_get_args());
 
   if(_log_get_logger()->getMask() &  Log::MASK(PEAR_LOG_DEBUG)) {
     _log_write_log_message($message, PEAR_LOG_DEBUG);
   }
+	
 }
 
 function log_info($message) {
+	
+	$message = _log_get_message(func_get_args());
 
   if(_log_get_logger()->getMask() &  Log::MASK(PEAR_LOG_INFO)){
     _log_write_log_message($message, PEAR_LOG_INFO);
   }
 }
 
-function log_warn($message) {
+function log_notice($message) {
+	
+	$message = _log_get_message(func_get_args());
 
-  if(_log_get_logger()->getMask() &  Log::MASK(PEAR_LOG_WARN)) {
+  if(_log_get_logger()->getMask() &  Log::MASK(PEAR_LOG_NOTICE)) {
+    _log_write_log_message($message, PEAR_LOG_NOTICE);
+  }
+}
+
+function log_warn($message) {
+	
+	$message = _log_get_message(func_get_args());
+
+  if(_log_get_logger()->getMask() &  Log::MASK(PEAR_LOG_WARNING)) {
     _log_write_log_message($message, PEAR_LOG_WARNING);
   }
 }
 
 function log_error($message) {
+	
+	$message = _log_get_message(func_get_args());
 
   if(_log_get_logger()->getMask() &  Log::MASK(PEAR_LOG_ERROR)){
     _log_write_log_message($message, PEAR_LOG_ERR, true);
   }
 }
 
+function log_critical($message) {
+	
+	$message = _log_get_message(func_get_args());
+
+  if(_log_get_logger()->getMask() &  Log::MASK(PEAR_LOG_CRIT)){
+    _log_write_log_message($message, PEAR_LOG_CRIT, true);
+  }
+}
+
+
+function log_alert($message) {
+	
+	$message = _log_get_message(func_get_args());
+
+  if(_log_get_logger()->getMask() &  Log::MASK(PEAR_LOG_ALERT)){
+    _log_write_log_message($message, PEAR_LOG_ALERT, true);
+  }
+}
+
+
 function log_emergency($message) {
+	
+	$message = _log_get_message(func_get_args());
 
   if(_log_get_logger()->getMask() &  Log::MASK(PEAR_LOG_EMERG)){
     _log_write_log_message($message, PEAR_LOG_EMERG, true);
   }
 }
-
-function _debug($message) {
-  log_debug($message);
-}
-
 
 
 include_once 'Log.php';
