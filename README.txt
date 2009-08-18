@@ -1,3 +1,5 @@
+This is the Drupal 6.x version of this module
+
 In order to use this module you must FIRST install the Pear log package on your web server.
 You may download this here :  http://pear.php.net/package/Log
 
