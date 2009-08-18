@@ -173,7 +173,7 @@ function _log_get_top($trace) {
   }
 
   switch(variable_get('log_precision', 0)) {
-    case 1: $file = substr($file, strlen($_SERVER['DOCUMENT_ROOT'] . base_path())); break;
+    case 1: $file = substr($file, strlen($_SERVER['DOCUMENT_ROOT'] . $GLOBALS['base_path'] )); break;
     case 2: $file = ltrim(strrchr($file, "/"), "/"); break;
   }
   return "[$file:$line] ";
